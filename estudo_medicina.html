@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>MedQuiz UNLP - Portátil</title>
+    <style>
+        :root { --primary: #007bff; --success: #28a745; --danger: #dc3545; --bg: #f8f9fa; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); display: flex; margin: 0; height: 100vh; overflow: hidden; }
+        .sidebar { width: 280px; background: #343a40; color: white; padding: 20px; display: flex; flex-direction: column; box-shadow: 2px 0 10px rgba(0,0,0,0.1); }
+        .materia-btn { background: rgba(255,255,255,0.1); border: 1px solid #495057; color: #fff; padding: 12px; margin: 5px 0; border-radius: 6px; cursor: pointer; text-align: left; transition: 0.2s; }
+        .materia-btn:hover { background: var(--primary); }
+        .main-content { flex: 1; padding: 40px; display: flex; justify-content: center; overflow-y: auto; }
+        .container { background: white; max-width: 700px; width: 100%; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); height: fit-content; }
+        .option { display: block; padding: 15px 15px 15px 45px; margin: 10px 0; border: 2px solid #eee; border-radius: 8px; cursor: pointer; position: relative; }
+        .option::before { content: attr(data-key); position: absolute; left: 15px; color: #aaa; font-weight: bold; }
+        .option.correct { background: #d4edda; border-color: var(--success); }
+        .option.incorrect { background: #f8d7da; border-color: var(--danger); }
+        .hidden { display: none; }
+        .manual-upload { margin-top: auto; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px; font-size: 12px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h2>📚 Matérias</h2>
+    <div id="materia-list">Carregando catálogo...</div>
+    
+    <div class="manual-upload">
+        <p>Não achou a matéria?<br>Arraste um JSON aqui:</p>
+        <input type="file" id="manualInput" accept=".json" style="width: 100%;">
+    </div>
+</div>
+
+<div class="main-content">
+    <div id="welcome" class="container">
+        <h1>🩺 MedQuiz UNLP</h1>
+        <p>Escolha uma matéria ao lado ou carregue um arquivo JSON individual para começar.</p>
+    </div>
+
+    <div id="quiz-ui" class="container hidden">
+        <h2 id="materia-titulo"></h2>
+        <div id="q-text" style="font-weight: 600; font-size: 19px; margin-bottom: 25px;"></div>
+        <div id="options-container"></div>
+        <div id="feedback-area" class="hidden">
+            <div id="rationale" style="margin-top:20px; padding:15px; background:#eef7ff; border-left:5px solid var(--primary); border-radius:8px;"></div>
+            <button onclick="nextQuestion()" style="width:100%; padding:12px; background:var(--primary); color:white; border:none; border-radius:8px; margin-top:20px; cursor:pointer;">Próxima (Espaço)</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let activeQuestions = [];
+    let currentIdx = 0;
+    let isAnswered = false;
+
+    // 1. Tentar carregar catálogo automático
+    fetch('materias.json')
+        .then(res => res.json())
+        .then(data => renderSidebar(data))
+        .catch(() => {
+            document.getElementById('materia-list').innerHTML = "<p style='color:#ffc107'>Catálogo não encontrado.<br>Use o modo manual abaixo.</p>";
+        });
+
+    function renderSidebar(catalog) {
+        const list = document.getElementById('materia-list');
+        list.innerHTML = '';
+        for (const materia in catalog) {
+            const btn = document.createElement('button');
+            btn.className = 'materia-btn';
+            btn.innerText = materia;
+            btn.onclick = () => loadMateriaFiles(catalog[materia], materia);
+            list.appendChild(btn);
+        }
+    }
+
+    // 2. Modo Manual (Sem catálogo)
+    document.getElementById('manualInput').addEventListener('change', function(e) {
+        const reader = new FileReader();
+        reader.onload = function() {
+            const json = JSON.parse(reader.result);
+            startQuiz(json.quiz, e.target.files[0].name.replace('.json', ''));
+        };
+        reader.readAsText(e.target.files[0]);
+    });
+
+    async function loadMateriaFiles(files, materia) {
+        activeQuestions = [];
+        for (const file of files) {
+            const res = await fetch(file);
+            const json = await res.json();
+            activeQuestions = activeQuestions.concat(json.quiz);
+        }
+        startQuiz(activeQuestions, materia);
+    }
+
+    function startQuiz(qs, titulo) {
+        activeQuestions = qs;
+        currentIdx = 0;
+        document.getElementById('materia-titulo').innerText = titulo;
+        document.getElementById('welcome').classList.add('hidden');
+        document.getElementById('quiz-ui').classList.remove('hidden');
+        showQuestion();
+    }
+
+    function showQuestion() {
+        isAnswered = false;
+        const q = activeQuestions[currentIdx];
+        document.getElementById('q-text').innerText = q.question;
+        const container = document.getElementById('options-container');
+        container.innerHTML = '';
+        document.getElementById('feedback-area').classList.add('hidden');
+
+        q.answerOptions.forEach((opt, i) => {
+            const div = document.createElement('div');
+            div.className = 'option';
+            div.setAttribute('data-key', i + 1);
+            div.innerText = opt.text;
+            div.onclick = () => handleAnswer(i);
+            container.appendChild(div);
+        });
+    }
+
+    function handleAnswer(idx) {
+        if (isAnswered) return;
+        isAnswered = true;
+        const q = activeQuestions[currentIdx];
+        const options = document.querySelectorAll('.option');
+        const isCorrect = q.answerOptions[idx].isCorrect;
+
+        options[idx].classList.add(isCorrect ? 'correct' : 'incorrect');
+        if (!isCorrect) {
+            const cIdx = q.answerOptions.findIndex(o => o.isCorrect);
+            options[cIdx].classList.add('correct');
+        }
+        document.getElementById('rationale').innerHTML = `<b>Explicación:</b> ${q.answerOptions.find(o => o.isCorrect).rationale}`;
+        document.getElementById('feedback-area').classList.remove('hidden');
+    }
+
+    function nextQuestion() {
+        currentIdx++;
+        if (currentIdx < activeQuestions.length) showQuestion();
+        else { alert("Simulado concluído!"); location.reload(); }
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key >= '1' && e.key <= '4' && !isAnswered) handleAnswer(parseInt(e.key) - 1);
+        else if (e.code === 'Space') { e.preventDefault(); if (isAnswered) nextQuestion(); }
+    });
+</script>
+</body>
+</html>
